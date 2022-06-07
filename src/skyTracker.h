@@ -29,17 +29,17 @@ class SkyTracker{
 
     long getAzimut(){
         //function for calculating azimut
-        if (hourAngle<STEPS_PER_REV/2){
-            return acos((sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle),2)+(sin(latitude*DRAD)*cos(hourAngle))))/DRAD;
+        if (hourAngle>=DAY/2){
+            return acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
         else{ //angle moved past 180°
-            return STEPS_PER_REV - acos((sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+(sin(latitude*DRAD)*cos(hourAngle*TRAD))))/DRAD;
+            return STEPS_PER_REV - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
     }
 
     long getAltitude(){
         //function for calculating altitude
-        return STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*tan(declination*DRAD) - cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/DRAD;
+        return STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) - cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
     }
 
     bool IRAM_ATTR TimerHandler0(void * timerNo){
