@@ -24,7 +24,9 @@ class SkyTracker{
     const unsigned long DAY = 86164; //duration of one day [ms]
     const double DRAD = 2*PI/ STEPS_PER_REV; //conversion: degree to radiant [rad/°]
     const double TRAD = 2*PI/ DAY; //conversion: radiant to degree [°/rad]
-    long declination = STEPS_PER_REV/4, latitude = 43*STEPS_PER_REV/360, curAzimut, curAltitude, azimut, altitude;
+    long declination = STEPS_PER_REV/4, latitude = 51*STEPS_PER_REV/360, curAzimut, curAltitude, azimut, altitude;
+    /*long altitude, curAltitude;
+    unsigned long azimut, curAzimut;*/
     volatile unsigned long hourAngle = DAY/2;
 
     long getAzimut(){
@@ -39,7 +41,7 @@ class SkyTracker{
 
     long getAltitude(){
         //function for calculating altitude
-        return STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) - cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
+        return STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
     }
 
     bool IRAM_ATTR TimerHandler0(void * timerNo){
@@ -123,7 +125,7 @@ class SkyTracker{
             digitalWrite(ALT_STEP, HIGH);
             curAltitude++;
         }
-        else if(curAltitude > altitude){
+        else if(curAltitude > altitude && curAltitude > 0){
             digitalWrite(ALT_DIR, !ALT_DIRECTION);
             digitalWrite(ALT_STEP, HIGH);
             curAltitude--; 
