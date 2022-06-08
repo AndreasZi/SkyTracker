@@ -1,10 +1,6 @@
 #include <Arduino.h>
 #include <math.h>
 
-#define _TIMERINTERRUPT_LOGLEVEL_ 4
-#include "ESP32TimerInterrupt.h"
-#define TIMER0_INTERVAL_MS 1000
-
 #define AZI_DIR 26
 #define AZI_STEP 25
 #define AZI_SLEEP 33
@@ -13,43 +9,41 @@
 #define ALT_DIR 12
 #define ALT_STEP 14
 #define ALT_SLEEP 27
+#define ALT_SENSOR 21
 #define ALT_DIRECTION 1
 
 #define STEPS_PER_REV 21600 //How many Step inpulses are required for one full revolution
 
-ESP32Timer ITimer0(0);
+
 class SkyTracker{
     private:
-    //constants fpr Calc
-    const unsigned long DAY = 86164; //duration of one day [ms]
+    //constants for calc
+    const unsigned int DAY = 86164; //duration of for one full revolution of the earth [s]
     const double DRAD = 2*PI/ STEPS_PER_REV; //conversion: degree to radiant [rad/°]
     const double TRAD = 2*PI/ DAY; //conversion: radiant to degree [°/rad]
-    long declination = STEPS_PER_REV/4, latitude = 51*STEPS_PER_REV/360, curAzimut, curAltitude, azimut, altitude;
-    /*long altitude, curAltitude;
-    unsigned long azimut, curAzimut;*/
-    volatile unsigned long hourAngle = DAY/2;
 
-    long getAzimut(){
-        //function for calculating azimut
+    //angle coordinates
+    int declination, latitude, curAzimut, curAltitude, azimut, altitude;
+
+    //time coordinates
+    volatile unsigned int hourAngle;
+
+    int getAzimut(){
+        //function for recalculating azimut
         if (hourAngle>=DAY/2){
-            return acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
+            azimut = acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
         else{ //angle moved past 180°
-            return STEPS_PER_REV - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
+            azimut = STEPS_PER_REV - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
+
+        return azimut;
     }
 
-    long getAltitude(){
-        //function for calculating altitude
-        return STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
-    }
-
-    bool IRAM_ATTR TimerHandler0(void * timerNo){
-        //function that is being called by timing interrupt
-        hourAngle++;
-        //azimut = getAzimut();
-        //altitude = getAltitude();
-        return true;
+    int getAltitude(){
+        //function for recalculating altitude
+        altitude = STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
+        return altitude;
     }
 
     
@@ -57,146 +51,156 @@ class SkyTracker{
     public:
 
     SkyTracker(){
-        //calculate the starting position based on lattitude
-        azimut = getAzimut();
-        altitude = getAltitude();
-        curAzimut = azimut;
-        curAltitude = altitude;
-
         //Initialisation of the stepper driver pins
 
         //Setting azimut pins as output
         pinMode(AZI_DIR, OUTPUT);
         pinMode(AZI_STEP, OUTPUT);
         pinMode(AZI_SLEEP, OUTPUT);
-        digitalWrite(AZI_SLEEP, LOW);
 
         //Setting altitude pins as output
         pinMode(ALT_DIR, OUTPUT);
         pinMode(ALT_STEP, OUTPUT);
         pinMode(ALT_SLEEP, OUTPUT);
-        digitalWrite(ALT_SLEEP, LOW);
-
-        //creating setup for timer functions
         
+        //setting binarysensor as input
+        pinMode(ALT_SENSOR,  INPUT_PULLUP);
 
+        //putting both motors to sleep
+        digitalWrite(AZI_SLEEP, LOW);
+        digitalWrite(ALT_SLEEP, LOW);
     }
 
     // Essential methods
+    // setLatitude(): measure the latitude of the observers location.
     // setPosition(): change the target coordinates
-    // move(): keep steppermotors on target
+    // move(): keep steppermotors on target. Has to be used repeatedly
 
-    void setPosition (unsigned long HOUR_ANGLE, unsigned long DECLINATION){
-        //updating position variables
-        hourAngle = HOUR_ANGLE;
-        declination = DECLINATION;
-        azimut = getAzimut();
-        altitude = getAltitude();
-
-        //wake up driver boards
+    void setLatitude(){
+        //waking up motors to reduce chance of accidental changes
         digitalWrite(AZI_SLEEP, HIGH);
         digitalWrite(ALT_SLEEP, HIGH);
 
-        //ITimer0.attachInterruptInterval(TIMER0_INTERVAL_MS * 1000, SkyTracker::TimerHandler0);
+        //setting counter to 0
+        latitude = 0;
+
+        //change direction of altitudal motor to negativ
+        digitalWrite(ALT_DIR, !ALT_DIRECTION);
+
+        //moving altitude-axis down until deadpoint is reached, meanwile counting steps taken
+        while(digitalRead(ALT_SENSOR)){
+            digitalWrite(ALT_STEP, HIGH);
+            delay(1);
+            digitalWrite(ALT_STEP, LOW);
+            delay(1);
+            //once loop is finished latitude should be final
+            latitude++;
+        }
+
+        //current position of the telescope is now (0 0)
+        curAzimut = 0;
+        curAltitude = 0;
+    }
+
+    void setPosition (unsigned int HOUR_ANGLE, unsigned int DECLINATION){
+        //updating position variables
+        hourAngle = HOUR_ANGLE;
+        declination = DECLINATION;
+
+        //recalculating target azimut and altitude
+        getAzimut();
+        getAltitude();
+        
+        //attach interrupt routine
     }
 
     void move(){
         if(curAzimut != azimut){
-            
             //Only moving azimut in positive direction for now, to avoid it moving backwards after crossing 0
+
+            //setting direction to positive
             digitalWrite(AZI_DIR, AZI_DIRECTION);
+            
+            //starting pulse to step pin
             digitalWrite(AZI_STEP, HIGH);
+
+            //counting pulse
             curAzimut++;
+
+            //if 360° have been crossed start over
             if(curAzimut >= STEPS_PER_REV){
                 curAzimut -= STEPS_PER_REV;
             }            
         }
-        /* else if(curAzimut > azimut){
-            digitalWrite(AZI_DIR, !AZI_DIRECTION);
-            digitalWrite(AZI_STEP, HIGH);
-            curAzimut--;
-        } */
-        
-        
 
         // keeping up with altitude
         if(curAltitude < altitude){
+            //setting direction to positive
             digitalWrite(ALT_DIR, ALT_DIRECTION);
+
+            //starting pulse to step pin
             digitalWrite(ALT_STEP, HIGH);
+
+            //counting pulse
             curAltitude++;
         }
         else if(curAltitude > altitude && curAltitude > 0){
+            //setting direction to negative
             digitalWrite(ALT_DIR, !ALT_DIRECTION);
-            digitalWrite(ALT_STEP, HIGH);
-            curAltitude--; 
-        } 
-        
-        
 
+            //starting pulse to step pin
+            digitalWrite(ALT_STEP, HIGH);
+
+            //counting pulse
+            curAltitude--;
+        } 
+
+        //finishing the pulse to the step pins
         delay(1);
         digitalWrite(AZI_STEP, LOW);
         digitalWrite(ALT_STEP, LOW);
         delay(1);
     }
 
+
+
+
     //Quality of life functions
-    //degToLong(): convert String of type 3606060 to the internally used units.
-    //timeToLong(): convert String of type 246060 to the internally used units.
-    //printData(): print all coordinates to the Serial Monitor
+    //degToint(): convert String of type 3606060 to the internally used units.
+    //timeToint(): convert String of type 246060 to the internally used units.
+    //printData(): return all coordinates as String
 
 
-    long degToLong(String str){
-        
-        /* if(str[0]=='-'){
-            return -(str.substring(1,3).toInt()*60 + str.substring(4,6).toInt());
-        }
-        else{
-            {
-            return str.substring(1,3).toInt()*60 + str.substring(4,6).toInt();
-        }
-        } */
-        /* Serial.print("str, substring 0,3: ");
-        Serial.print(str);
-        Serial.print(", ");
-        Serial.println(str.substring(0,3)); */
+    int degToInt(String str){
         return str.substring(0,3).toInt()*STEPS_PER_REV/360;
     }
 
-    unsigned long timeToLong(String str){
-        //return str.substring(0,2).toInt()*3600+str.substring(3,5).toInt()*60+str.substring(6,8).toInt();
+    unsigned int timeToInt(String str){
         return str.substring(0,2).toInt()*3600;
     }
     
-    long degree(long minAngle){
-        return minAngle*360/STEPS_PER_REV;
+    String angle(int arcSeconds){
+        int degrees = arcSeconds*360/STEPS_PER_REV;
+        int arcMinutes = arcSeconds - degrees*STEPS_PER_REV/360;
+        return String(degrees) + "°" + String(arcMinutes) + "'";
     }
 
-    int hours(unsigned long seconds){
-        return seconds/3600;
+    String time(unsigned int seconds){
+        int hours = seconds/3600;
+        int minutes = (seconds-hours*3600)/60;
+        seconds -= hours*3600 + minutes*60;
+        return String(hours) + "h" + String(minutes) + "m" + String(seconds) + "s";
     }
 
 
-    void printData(){
-        Serial.println("<------SkyTracker-Data------>");
-
-        Serial.println("Given values:");
-        Serial.print("declination: ");
-        Serial.print(degree(declination));
-        Serial.print("; hourAngle: ");
-        Serial.println(hours(hourAngle));
-
-        Serial.println("resulting values:");
-        Serial.print("azimut: ");
-        Serial.print(degree(azimut));
-        Serial.print("; altitude: ");
-        Serial.println(degree(altitude));
-
-        Serial.println("current position:");        
-        Serial.print("curAzimut: ");
-        Serial.print(degree(curAzimut));
-        Serial.print("; curAltitude: ");
-        Serial.println(degree(curAltitude));
-        Serial.println("<--------------------------->");
+    String printData(){
+        return "\n\n<-------SkyTracker-Data------->\n"
+            "Given:\n"
+            "declination: " + angle(declination) + "; hourAngle: " + time(hourAngle) + "\n\n"
+            "Calculated target:\n"
+            "azimut: " + angle(azimut) + "; altitude: " + angle(altitude) + "\n\n"
+            "current position:\n"
+            "curAzimut: " + angle(curAzimut) + "; curAltitude: " + angle(curAltitude) + "\n\n"
+            "<----------------------------->\n";
     }
-
 };

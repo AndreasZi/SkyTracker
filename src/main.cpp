@@ -15,16 +15,16 @@ const String index_html =
             "<head>"
                 "<script>"
                     "async function requestState (path){var x = await fetch(path);};"  
-                    "function updatePosition (){requestState('data?hourAngle='+document.getElementById('hourAngle').value + '&declination='+document.getElementById('declination').value);};"
+                    "function setPosition(){requestState('data?hourAngle='+document.getElementById('hourAngle').value + '&declination='+document.getElementById('declination').value);};"
+                    "function setLatitude(){requestState('setLatitude');};"
                 "</script>"
-                "<style>"
-                "</style>"
             "</head>"
             "<body>"
                 "<p>"
+                "<a href=\"setLatitude\">setLatitude</a><br><br>"
                 "Stundenwinkel<br><input id='hourAngle' type='text';\"></input><br><br>"
                 "Deklination<br><input id='declination' type='text';\"></input><br><br>"
-                "<button onclick=\"updatePosition();\">confirm</button><br><a id='info'></a>"
+                "<button onclick=\"setPosition();\">setPosition</button><br><a id='info'></a>"
                 "</p>"
             "</body>"
         "</html>";
@@ -47,6 +47,13 @@ void setup() {
         request->send(200, "text/html",  index_html);
     });
 
+    server.on("/setLatitude", HTTP_GET, [](AsyncWebServerRequest *request){
+        Serial.print("setting Latitude");
+        sky.setLatitude();
+        Serial.print("Latitude is now Set");
+        request->send(200, "text/html",  index_html);
+    });
+
     //data-api for live-updates
     server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){
         unsigned long hourAngle = 0;
@@ -63,15 +70,15 @@ void setup() {
             //Accepting string with xxhxxmxxs format
             String str = request->getParam("hourAngle")->value();
             //converting string to seconds
-            hourAngle = sky.timeToLong(str);
+            hourAngle = sky.timeToInt(str);
         }
         if(request->hasParam("declination")) {
             //Accepting string with +xx°xx' format
             String str = request->getParam("declination")->value();
-            declination = sky.degToLong(str);
+            declination = sky.degToInt(str);
         }
         sky.setPosition(hourAngle, declination);
-        sky.printData();
+        Serial.println(sky.printData());
         request->send(200, "text/plain", " ");
         
     });
@@ -81,6 +88,8 @@ void setup() {
     Serial.begin(9600);
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
+    /* sky.setLatitude();
+    Serial.println("Latitude set!"); */
 }
 
 void loop() {
