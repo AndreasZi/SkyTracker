@@ -77,7 +77,7 @@ void setup() {
             String str = request->getParam("declination")->value();
             declination = sky.degToInt(str);
         }
-        sky.setPosition(hourAngle, declination);
+        sky.setPositionH(hourAngle, declination);
         Serial.println(sky.printData());
         request->send(200, "text/plain", " ");
         

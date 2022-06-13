@@ -26,7 +26,7 @@ class SkyTracker{
     int declination, latitude, curAzimut, curAltitude, azimut, altitude;
 
     //time coordinates
-    volatile unsigned int hourAngle;
+    volatile unsigned int hourAngle, rightAscensionSum;
 
     int getAzimut(){
         //function for recalculating azimut
@@ -46,7 +46,14 @@ class SkyTracker{
         return altitude;
     }
 
-    
+    void track(){
+        //function that is called every second to keep coordinates up to date
+        hourAngle++;
+        rightAscensionSum++;
+        while(hourAngle>DAY){
+            hourAngle -= DAY;
+        }
+    }
 
     public:
 
@@ -102,8 +109,22 @@ class SkyTracker{
         curAltitude = 0;
     }
 
-    void setPosition (unsigned int HOUR_ANGLE, unsigned int DECLINATION){
-        //updating position variables
+    void setPositionR (unsigned int RIGHT_ASCENSION, unsigned int DECLINATION){
+        //updating position variables based on right ascension
+        hourAngle = rightAscensionSum - RIGHT_ASCENSION;
+        declination = DECLINATION;
+        while(hourAngle>DAY){
+            hourAngle -= DAY;
+        }
+        //recalculating target azimut and altitude
+        getAzimut();
+        getAltitude();
+        
+        //attach interrupt routine
+    }
+
+    void setPositionH (unsigned int HOUR_ANGLE, unsigned int DECLINATION){
+        //updating position variables based on hour angle
         hourAngle = HOUR_ANGLE;
         declination = DECLINATION;
 
