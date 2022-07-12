@@ -1,0 +1,16 @@
+<!DOCTYPE html><html><head>
+            <script>
+                    "async function requestState (path){var x = await fetch(path);};"  
+                    "function setPositionH(){requestState('data?hourAngle='+document.getElementById('hourAngle').value + '&declination='+document.getElementById('declination').value);};"
+                    "function setPositionR(){requestState('data?rightAscension='+document.getElementById('rightAscension').value + '&declination='+document.getElementById('declination').value);};"
+                    "function toggleTracking(){requestState('toggleTracking');};"
+                    "function setRightAscension(){requestState('data/setRightAscension?rightAscension='+document.getElementById('rightAscension').value);};"
+                </script>
+                <style>.category{padding: 1em;float: left;width: 100%;}</style>
+            </head>
+            <body>
+                    <div class='category'>Deklination <input id='declination' type='text';></input></div>
+                    <div class='category'>Stundenwinkel <input id='hourAngle' type='text';></input><button onclick='setPositionH();'>setPositionH</button></div>
+                    <div class='category'>Right Ascension <input id='rightAscension' type='text';></input><button onclick='setPositionR();'>setPositionR</button><button onclick='setRightAscension();'>setRightAscension</button></div>
+                    <div class='category'><button onclick='toggleTracking();'>toggleTracking</button></div>
+            </body></html>
