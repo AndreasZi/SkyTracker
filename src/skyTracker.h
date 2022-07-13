@@ -1,26 +1,15 @@
 #include <Arduino.h>
 #include <math.h>
+#include "BasicStepperDriver.h"
 
+#define RPM 1
 
-#define AZI_DIR 26
-#define ALT_DIR 16
-
-#define AZI_STEP 25
-#define ALT_STEP 17
-
-#define AZI_SLEEP 33
-#define ALT_SLEEP 5
-
-//Microstepping aktivieren
-#define AZI_MST 32
-#define ALT_MST 32
-
-#define ALT_SENSOR 23
+#define SECOND 1
 
 #define ALT_DIRECTION 1
 #define AZI_DIRECTION 1
 
-#define STEPS_PER_REV 21600 //How many Step inpulses are required for one full revolution
+
 
 
 
@@ -32,7 +21,7 @@ volatile int timerCounter;
 void IRAM_ATTR track(){
         //function that is called every second to keep coordinates up to date
         portENTER_CRITICAL_ISR(&timerMux);
-        timerCounter++;
+        timerCounter+=SECOND;
         portEXIT_CRITICAL_ISR(&timerMux);
     }
 
@@ -42,8 +31,12 @@ class SkyTracker{
     private:
     //constants for calc
     static const unsigned int DAY = 86164; //duration of for one full revolution of the earth [s]
-    static constexpr double DRAD = 2*PI/ STEPS_PER_REV; //conversion: degree to radiant [rad/°]
     static constexpr double TRAD = 2*PI/ DAY; //conversion: radiant to degree [°/rad]
+
+    unsigned int STEPS; //How many Step inpulses are required for one full revolution
+    double DRAD; //conversion: degree to radiant [rad/°]
+
+    BasicStepperDriver *stepperA, *stepperH;
 
     bool tracking = false;
 
@@ -58,7 +51,7 @@ class SkyTracker{
             azimut = acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
         else{ //angle moved past 180°
-            azimut = STEPS_PER_REV - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
+            azimut = STEPS - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
         
         return azimut;
@@ -66,7 +59,7 @@ class SkyTracker{
 
     int getAltitude(){
         //function for recalculating altitude
-        altitude = STEPS_PER_REV/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
+        altitude = STEPS/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
         
         return altitude;
     }
@@ -78,32 +71,29 @@ class SkyTracker{
 
     public:
 
-    SkyTracker(){
+    SkyTracker(BasicStepperDriver &stepperAzimut, BasicStepperDriver &stepperAltitude){
         //Initialisation of the stepper driver pins
 
-        //Setting azimut pins as output
-        pinMode(AZI_DIR, OUTPUT);
-        pinMode(AZI_STEP, OUTPUT);
-        pinMode(AZI_SLEEP, OUTPUT);
-        pinMode(AZI_MST, OUTPUT);
+        //Setting steppermotors
+        stepperA = &stepperAzimut;
+        stepperH = &stepperAltitude;
+        stepperA->begin(RPM);
+        stepperH->begin(RPM);
 
-        //Setting altitude pins as output
-        pinMode(ALT_DIR, OUTPUT);
-        pinMode(ALT_STEP, OUTPUT);
-        pinMode(ALT_SLEEP, OUTPUT);
+        STEPS = stepperA->getSteps();
+        DRAD = 2*PI/ STEPS;
+
+        //Microstepping is always on
+        /* pinMode(AZI_MST, OUTPUT);
         pinMode(ALT_MST, OUTPUT);
-        
-        //setting binarysensor as input
-        pinMode(ALT_SENSOR,  INPUT_PULLUP);
-
-        //putting both motors to sleep
-        digitalWrite(AZI_SLEEP, LOW);
-        digitalWrite(ALT_SLEEP, LOW);
         digitalWrite(AZI_MST, HIGH);
-        digitalWrite(ALT_MST, HIGH);
+        digitalWrite(ALT_MST, HIGH); */
+
+        
+        
+
 
         //Setting up timer Interrupt
-
         timerMux = portMUX_INITIALIZER_UNLOCKED;
         timer = timerBegin(0, 80, true);
         timerAttachInterrupt(timer, &track, true);
@@ -115,25 +105,25 @@ class SkyTracker{
     // setPosition(): change the target coordinates
     // move(): keep steppermotors on target. Has to be used repeatedly
 
-    void setLatitude(){
+    void setLatitude(uint8_t sensorPin){
+        //setting binarysensor as input
+        pinMode(sensorPin,  INPUT_PULLUP);
+        
         //waking up motors to reduce chance of accidental changes
-        digitalWrite(AZI_SLEEP, HIGH);
-        digitalWrite(ALT_SLEEP, HIGH);
+        stepperA->enable();
+        stepperH->enable();
 
         //setting counter to 0
         latitude = 0;
 
-        //change direction of altitudal motor to negativ
-        digitalWrite(ALT_DIR, !ALT_DIRECTION);
+        
 
         //moving altitude-axis down until deadpoint is reached, meanwile counting steps taken
-        while(digitalRead(ALT_SENSOR)){
-            digitalWrite(ALT_STEP, HIGH);
-            delay(1);
-            digitalWrite(ALT_STEP, LOW);
-            delay(1);
+        while(digitalRead(sensorPin)){
+            stepperH->move(-ALT_DIRECTION);
             //once loop is finished latitude should be final
             latitude++;
+            delay(1);
         }
 
         //current position of the telescope is now (0 0)
@@ -142,8 +132,9 @@ class SkyTracker{
     }
 
 
-    void setRightAscension(unsigned int RIGHT_ASCENSION){
-        sidereal = hourAngle - RIGHT_ASCENSION;
+    void setSideral(unsigned int RIGHT_ASCENSION, unsigned int HOUR_ANGLE){
+        //Setting sideral is required in order to use the setPositionR function
+        sidereal = HOUR_ANGLE - RIGHT_ASCENSION;
     }
 
 
@@ -173,11 +164,10 @@ class SkyTracker{
         //recalculating target azimut and altitude
         getAzimut();
         getAltitude();
-        
-        //attach interrupt routine
     }
 
     void toggleTracking(){
+        //toggling the systems function to follow the movement of the sky
         tracking = !tracking;
         if(tracking){
             timerCounter = 0;
@@ -191,80 +181,61 @@ class SkyTracker{
 
     void move(){
         if(timerCounter>0){
+            //refreshing timeing variables with countervalues
             hourAngle+=timerCounter;
             sidereal+=timerCounter;
-            portENTER_CRITICAL(&timerMux);
-            timerCounter = 0;
-            portEXIT_CRITICAL(&timerMux);
+
+            //limiting timing variables to one day
             while(hourAngle>DAY){
                 hourAngle -= DAY;
             }
+            while(sidereal>DAY){
+                sidereal -= DAY;
+            }
+
+            //Reseting timer counter
+            portENTER_CRITICAL(&timerMux);
+            timerCounter = 0;
+            portEXIT_CRITICAL(&timerMux);
+
+            
+
+            //recalculating target position
             getAzimut();
             getAltitude();
-            //Serial.print(printData());
         }
-        if(azimut - curAzimut < 0 && azimut - curAzimut > -STEPS_PER_REV/2){
-            //Only moving azimut in positive direction for now, to avoid it moving backwards after crossing 0
+        if(azimut - curAzimut < 0 && azimut - curAzimut > -STEPS-10){
+            //allowing backwards movement for faster targeting time
 
-            //setting direction to positive
-            digitalWrite(AZI_DIR, !AZI_DIRECTION);
-            
-            //starting pulse to step pin
-            digitalWrite(AZI_STEP, HIGH);
+            //Move stepper to the desired location  
+            stepperA->move(azimut - curAzimut);
+            //setnew location
+            curAzimut=azimut;
+        }
+        else if(azimut - curAzimut < -STEPS-10 && azimut - curAzimut >= -STEPS){
+            //avoid it moving backwards after crossing 0
 
-            //counting pulse
-            curAzimut--;
-
-            //if 360° have been crossed start over
-            if(curAzimut <= 0){
-                curAzimut += STEPS_PER_REV;
-            }             
+            //Move stepper to the desired location  
+            stepperA->move(azimut - curAzimut + STEPS);
+            //setnew location
+            curAzimut=azimut;
         }
         else if(curAzimut != azimut){
-            //Only moving azimut in positive direction for now, to avoid it moving backwards after crossing 0
+            //Only moving azimut in positive direction
 
-            //setting direction to positive
-            digitalWrite(AZI_DIR, AZI_DIRECTION);
-            
-            //starting pulse to step pin
-            digitalWrite(AZI_STEP, HIGH);
-
-            //counting pulse
-            curAzimut++;
-
-            //if 360° have been crossed start over
-            if(curAzimut >= STEPS_PER_REV){
-                curAzimut -= STEPS_PER_REV;
-            }            
+            //Move stepper to the desired location  
+            stepperA->move(azimut - curAzimut);
+            //setnew location
+            curAzimut=azimut;     
         }
 
-        // keeping up with altitude
-        if(curAltitude < altitude){
-            //setting direction to positive
-            digitalWrite(ALT_DIR, ALT_DIRECTION);
-
-            //starting pulse to step pin
-            digitalWrite(ALT_STEP, HIGH);
-
-            //counting pulse
-            curAltitude++;
+        if(curAltitude != altitude){
+            //Move stepper to the desired location  
+            stepperH->move(altitude - curAltitude);
+            //setnew location
+            curAltitude = altitude;
         }
-        else if(curAltitude > altitude && curAltitude > 0){
-            //setting direction to negative
-            digitalWrite(ALT_DIR, !ALT_DIRECTION);
-
-            //starting pulse to step pin
-            digitalWrite(ALT_STEP, HIGH);
-
-            //counting pulse
-            curAltitude--;
-        } 
-
-        //finishing the pulse to the step pins
-        delay(1);
-        digitalWrite(AZI_STEP, LOW);
-        digitalWrite(ALT_STEP, LOW);
-        delay(1);
+    delay(1); //delay for stability
     }
 
 
@@ -277,16 +248,29 @@ class SkyTracker{
 
 
     int degToInt(String str){
-        return str.substring(0,3).toInt()*STEPS_PER_REV/360;
+        //converts input string of type 360°60m to steps
+        /* int d = 0, m = 0;
+        if (str.indexOf('°')>0 ){
+            d = str.substring((str.indexOf('°')-4<0)?0:str.indexOf('°')-4,str.indexOf('°')-1).toInt()*STEPS/360;
+        }
+        if (str.indexOf('m')>0){
+            m = str.substring(str.indexOf('m')-3,str.indexOf('m')-1).toInt()*STEPS/(360*60) - d;
+        } */
+        
+        return str.substring(0,2).toInt()*STEPS/360;
+        //(str[0]=='-')?-(d + m):d + m;
     }
 
     unsigned int timeToInt(String str){
-        return str.substring(0,2).toInt()*3600;
+        //converts inputr string of type 24h60m60s to seconds
+        
+        int begin = str.indexOf('h')-2;
+        return str.substring(begin,2).toInt()*3600 + str.substring(begin+3,2).toInt()*60+ str.substring(begin+6,2).toInt();
     }
     
     String angle(int arcSeconds){
-        int degrees = arcSeconds*360/STEPS_PER_REV;
-        int arcMinutes = arcSeconds - degrees*STEPS_PER_REV/360;
+        int degrees = arcSeconds/60/60;
+        int arcMinutes = (arcSeconds - degrees*60*60)/60;
         return String(degrees) + "°" + String(arcMinutes) + "'";
     }
 

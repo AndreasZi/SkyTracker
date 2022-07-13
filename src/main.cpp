@@ -3,11 +3,34 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 
+#include "A4988.h"
+
 #include "skyTracker.h"
 
 
+#define AZI_DIR 26
+#define ALT_DIR 16
 
-SkyTracker sky = SkyTracker();
+#define AZI_STEP 25
+#define ALT_STEP 17
+
+#define AZI_SLEEP 33
+#define ALT_SLEEP 5
+
+#define ALT_SENSOR 23
+
+#define STEPS_PER_REV 21600 
+
+
+//On the prototype, all driver-MST-Pins are connected to one pin on the ESP.
+#define MST 32
+
+A4988 stepperA(STEPS_PER_REV, AZI_DIR, AZI_STEP, AZI_SLEEP);
+A4988 stepperH(STEPS_PER_REV, ALT_DIR, ALT_STEP, ALT_SLEEP);
+
+
+
+SkyTracker sky = SkyTracker(stepperA, stepperH);
 
 AsyncWebServer server(80);
 const String index_html = 
@@ -17,14 +40,14 @@ const String index_html =
                     "function setPositionH(){requestState('data?hourAngle='+document.getElementById('hourAngle').value + '&declination='+document.getElementById('declination').value);};"
                     "function setPositionR(){requestState('data?rightAscension='+document.getElementById('rightAscension').value + '&declination='+document.getElementById('declination').value);};"
                     "function toggleTracking(){requestState('toggleTracking');};"
-                    "function setRightAscension(){requestState('data/setRightAscension?rightAscension='+document.getElementById('rightAscension').value);};"
+                    "function setSideral(){requestState('data/setSideral?rightAscension='+document.getElementById('rightAscension').value);};"
                 "</script>"
                 "<style>.category{padding: 1em;float: left;width: 100%;}</style>"
             "</head>"
             "<body>"
                     "<div class='category'>Deklination <input id='declination' type='text';></input></div>"
                     "<div class='category'>Stundenwinkel <input id='hourAngle' type='text';></input><button onclick='setPositionH();'>setPositionH</button></div>"
-                    "<div class='category'>Right Ascension <input id='rightAscension' type='text';></input><button onclick='setPositionR();'>setPositionR</button><button onclick='setRightAscension();'>setRightAscension</button></div>"                    
+                    "<div class='category'>Right Ascension <input id='rightAscension' type='text';></input><button onclick='setPositionR();'>setPositionR</button><button onclick='setSideral();'>setSideral</button></div>"                    
                     "<div class='category'><button onclick='toggleTracking();'>toggleTracking</button></div>"
             "</body>";
 
@@ -35,7 +58,12 @@ const String index_html =
 
 void setup() {
 
-  Serial.begin(9600);
+    /* stepperA.setMicrostep(16);
+    stepperH.setMicrostep(16); */
+
+    pinMode(ALT_SENSOR,OUTPUT);
+    digitalWrite(ALT_SENSOR,HIGH);
+    Serial.begin(9600);
   
     IPAddress local_IP(192,168,1,1);
     IPAddress gateway(192,168,1,0);
@@ -48,12 +76,10 @@ void setup() {
         request->send(200, "text/html",  index_html);
     });
 
-    server.on("/data/setRightAscension", HTTP_GET, [](AsyncWebServerRequest *request){
-        if(request->hasParam("rightAscension")) {
+    server.on("/data/setSideral", HTTP_GET, [](AsyncWebServerRequest *request){
+        if(request->hasParam("rightAscension") && request->hasParam("hourAngle")) {
             //Accepting string with xxhxxmxxs format
-            String str = request->getParam("hourAngle")->value();
-            //converting string to seconds
-            sky.setRightAscension(sky.timeToInt(str));
+            sky.setSideral(sky.timeToInt(request->getParam("rightAscension")->value()),sky.timeToInt(request->getParam("hourAngle")->value()));
         }
         request->send(200, "text/html",  index_html);
     });
@@ -117,11 +143,13 @@ void setup() {
     Serial.begin(9600);
     Serial.print("IP Address: ");
     Serial.println(WiFi.softAPIP());
-    /* sky.setLatitude();
-    Serial.println("Latitude set!"); */
+    
+
+    //To set your current latitude, target the sysem at the polar star and hit the altitude endstop
+    pinMode(ALT_SENSOR,  INPUT_PULLUP);
     while(digitalRead(ALT_SENSOR));
     delay(500);
-    sky.setLatitude(); //setting lat via wifi takes to much time for the interrupt
+    sky.setLatitude(ALT_SENSOR); //setting lat via wifi takes to much time for the interrupt
 
     Serial.print("setLat");
 }
