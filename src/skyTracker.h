@@ -2,9 +2,9 @@
 #include <math.h>
 #include "BasicStepperDriver.h"
 
-#define RPM 1
+#define RPM 4
 
-#define SECOND 1
+#define SECOND 30
 
 #define ALT_DIRECTION 1
 #define AZI_DIRECTION 1
@@ -42,7 +42,7 @@ class SkyTracker{
 
     //angle coordinates
     int declination, latitude;
-    unsigned int hourAngle, sidereal, curAzimut, curAltitude, azimut, altitude;
+    int hourAngle, sideral, curAzimut, curAltitude, azimut, altitude;
     
 
     int getAzimut(){
@@ -50,7 +50,8 @@ class SkyTracker{
         if (hourAngle>=DAY/2){
             azimut = acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
-        else{ //angle moved past 180°
+        else{ 
+            //angle moved past 180°
             azimut = STEPS - acos((-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD))/sqrt(pow(sin(hourAngle*TRAD),2)+pow(-sin(latitude*DRAD)*cos(hourAngle*TRAD)+cos(latitude*DRAD)*tan(declination*DRAD), 2)))/DRAD;
         }
         
@@ -60,7 +61,9 @@ class SkyTracker{
     int getAltitude(){
         //function for recalculating altitude
         altitude = STEPS/4 - acos(sin(latitude*DRAD)*sin(declination*DRAD) + cos(latitude*DRAD)*cos(hourAngle*TRAD)*cos(declination*DRAD))/(DRAD);
-        
+        if(altitude<0){
+            altitude = 0;
+        }
         return altitude;
     }
 
@@ -80,14 +83,11 @@ class SkyTracker{
         stepperA->begin(RPM);
         stepperH->begin(RPM);
 
+        //setting the total number of steps required for one full revolution
         STEPS = stepperA->getSteps();
+        //Calculating the converdion factor for deg->rad
         DRAD = 2*PI/ STEPS;
 
-        //Microstepping is always on
-        /* pinMode(AZI_MST, OUTPUT);
-        pinMode(ALT_MST, OUTPUT);
-        digitalWrite(AZI_MST, HIGH);
-        digitalWrite(ALT_MST, HIGH); */
 
         
         
@@ -134,23 +134,27 @@ class SkyTracker{
 
     void setSideral(unsigned int RIGHT_ASCENSION, unsigned int HOUR_ANGLE){
         //Setting sideral is required in order to use the setPositionR function
-        sidereal = HOUR_ANGLE - RIGHT_ASCENSION;
+        sideral = HOUR_ANGLE + RIGHT_ASCENSION;
+        while(sideral>=DAY){
+            sideral -= DAY;
+        }
     }
 
 
     void setPositionR (unsigned int RIGHT_ASCENSION, unsigned int DECLINATION){
         //updating position variables based on right ascension
         
-        hourAngle = sidereal - RIGHT_ASCENSION;
-        while(hourAngle>DAY){
-            hourAngle -= DAY;
+        
+        if(- RIGHT_ASCENSION + sideral < 0){
+            hourAngle  = - RIGHT_ASCENSION + sideral + DAY;
+        }
+        else{
+            hourAngle = - RIGHT_ASCENSION + sideral;
         }
         
+        
 
-        declination = DECLINATION;
-        //recalculating target azimut and altitude
-        getAzimut();
-        getAltitude();
+        setPositionH(hourAngle, DECLINATION);
         
         //attach interrupt routine
     }
@@ -183,14 +187,14 @@ class SkyTracker{
         if(timerCounter>0){
             //refreshing timeing variables with countervalues
             hourAngle+=timerCounter;
-            sidereal+=timerCounter;
+            sideral+=timerCounter;
 
             //limiting timing variables to one day
             while(hourAngle>DAY){
                 hourAngle -= DAY;
             }
-            while(sidereal>DAY){
-                sidereal -= DAY;
+            while(sideral>DAY){
+                sideral -= DAY;
             }
 
             //Reseting timer counter
@@ -204,19 +208,11 @@ class SkyTracker{
             getAzimut();
             getAltitude();
         }
-        if(azimut - curAzimut < 0 && azimut - curAzimut > -STEPS-10){
-            //allowing backwards movement for faster targeting time
+        if(azimut - curAzimut < -int(STEPS)/2 && azimut - curAzimut > -int(STEPS)){
+            //avoid it moving backwards after crossing 0   
 
             //Move stepper to the desired location  
-            stepperA->move(azimut - curAzimut);
-            //setnew location
-            curAzimut=azimut;
-        }
-        else if(azimut - curAzimut < -STEPS-10 && azimut - curAzimut >= -STEPS){
-            //avoid it moving backwards after crossing 0
-
-            //Move stepper to the desired location  
-            stepperA->move(azimut - curAzimut + STEPS);
+            stepperA->move(azimut - curAzimut + int(STEPS));
             //setnew location
             curAzimut=azimut;
         }
@@ -231,9 +227,9 @@ class SkyTracker{
 
         if(curAltitude != altitude){
             //Move stepper to the desired location  
-            stepperH->move(altitude - curAltitude);
-            //setnew location
-            curAltitude = altitude;
+                stepperH->move(altitude - curAltitude);
+                //setnew location
+                curAltitude = altitude;
         }
     delay(1); //delay for stability
     }
@@ -247,7 +243,7 @@ class SkyTracker{
     //printData(): return all coordinates as String
 
 
-    int degToInt(String str){
+    int degToInt(String str){ //WORK IN PROGRESS
         //converts input string of type 360°60m to steps
         /* int d = 0, m = 0;
         if (str.indexOf('°')>0 ){
@@ -256,9 +252,23 @@ class SkyTracker{
         if (str.indexOf('m')>0){
             m = str.substring(str.indexOf('m')-3,str.indexOf('m')-1).toInt()*STEPS/(360*60) - d;
         } */
-        
-        return str.substring(0,2).toInt()*STEPS/360;
-        //(str[0]=='-')?-(d + m):d + m;
+
+        int sign = 1;
+
+        int deg = str.indexOf('°');
+
+
+        int min = str.indexOf('\'');
+        min = str.substring(deg+1,min-1).toInt();
+        if(str[0]=='-'){
+            sign = -1;
+            deg = str.substring(1,deg-1).toInt();
+        }
+        else{
+            deg = str.substring(0,deg-1).toInt();
+        }
+            
+        return sign*(deg*360);
     }
 
     unsigned int timeToInt(String str){
@@ -268,9 +278,9 @@ class SkyTracker{
         return str.substring(begin,2).toInt()*3600 + str.substring(begin+3,2).toInt()*60+ str.substring(begin+6,2).toInt();
     }
     
-    String angle(int arcSeconds){
-        int degrees = arcSeconds/60/60;
-        int arcMinutes = (arcSeconds - degrees*60*60)/60;
+    String angle(int arcMinutes){
+        int degrees = arcMinutes/60;
+        arcMinutes -= degrees*60;
         return String(degrees) + "°" + String(arcMinutes) + "'";
     }
 
@@ -284,7 +294,7 @@ class SkyTracker{
 
     String printData(){
         return "\n<-------SkyTracker-Data------->\n"
-            "Equatorial[Declination: " + angle(declination) + ", Hour Angle: " + time(hourAngle) + "]\n"
+            "Equatorial[Declination: " + angle(declination) + ", Hour Angle: " + time(hourAngle) + ", Sideral Time: " + time(sideral) +  "]\n"
             "Horizontal[Azimut: " + angle(azimut) + ", Altitude: " + angle(altitude) + "]\n";
     }
 };

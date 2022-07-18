@@ -40,14 +40,14 @@ const String index_html =
                     "function setPositionH(){requestState('data?hourAngle='+document.getElementById('hourAngle').value + '&declination='+document.getElementById('declination').value);};"
                     "function setPositionR(){requestState('data?rightAscension='+document.getElementById('rightAscension').value + '&declination='+document.getElementById('declination').value);};"
                     "function toggleTracking(){requestState('toggleTracking');};"
-                    "function setSideral(){requestState('data/setSideral?rightAscension='+document.getElementById('rightAscension').value);};"
+                    "function setSideral(){requestState('data/setSideral?rightAscension='+document.getElementById('rightAscension').value + '&hourAngle='+document.getElementById('hourAngle').value);};"
                 "</script>"
                 "<style>.category{padding: 1em;float: left;width: 100%;}</style>"
             "</head>"
             "<body>"
-                    "<div class='category'>Deklination <input id='declination' type='text';></input></div>"
-                    "<div class='category'>Stundenwinkel <input id='hourAngle' type='text';></input><button onclick='setPositionH();'>setPositionH</button></div>"
-                    "<div class='category'>Right Ascension <input id='rightAscension' type='text';></input><button onclick='setPositionR();'>setPositionR</button><button onclick='setSideral();'>setSideral</button></div>"                    
+                    "<div class='category'>Deklination <input id='declination' type='number';></input></div>"
+                    "<div class='category'>Stundenwinkel <input id='hourAngle' type='number';></input><button onclick='setPositionH();'>setPositionH</button></div>"
+                    "<div class='category'>Right Ascension <input id='rightAscension' type='number';></input><button onclick='setPositionR();'>setPositionR</button><button onclick='setSideral();'>setSideral</button></div>"                    
                     "<div class='category'><button onclick='toggleTracking();'>toggleTracking</button></div>"
             "</body>";
 
@@ -58,104 +58,95 @@ const String index_html =
 
 void setup() {
 
-    /* stepperA.setMicrostep(16);
-    stepperH.setMicrostep(16); */
-
-    pinMode(ALT_SENSOR,OUTPUT);
-    digitalWrite(ALT_SENSOR,HIGH);
     Serial.begin(9600);
   
+
+    //Setting up Wifi AP
     IPAddress local_IP(192,168,1,1);
     IPAddress gateway(192,168,1,0);
     IPAddress subnet(255,255,255,0);
     
     WiFi.softAPConfig(local_IP, gateway, subnet);
     WiFi.softAP("SkyTracker");
-    //main page
+
+
+  
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        //Tghis serves the mainpage on adress 192.168.1.1/
         request->send(200, "text/html",  index_html);
     });
 
     server.on("/data/setSideral", HTTP_GET, [](AsyncWebServerRequest *request){
+        //function for calculating sideral time
         if(request->hasParam("rightAscension") && request->hasParam("hourAngle")) {
-            //Accepting string with xxhxxmxxs format
-            sky.setSideral(sky.timeToInt(request->getParam("rightAscension")->value()),sky.timeToInt(request->getParam("hourAngle")->value()));
+            
+            sky.setSideral(request->getParam("rightAscension")->value().toFloat()*3600,request->getParam("hourAngle")->value().toFloat()*3600);
         }
+        Serial.println("Sideral set");
         request->send(200, "text/html",  index_html);
     });
 
+    
     server.on("/toggleTracking", HTTP_GET, [](AsyncWebServerRequest *request){
+        //activating or deactivating tracking function
         sky.toggleTracking();
         request->send(200, "text/html",  index_html);
     });  
 
     
 
-    //data-api for live-updates
+    
     server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){
+        //Function for setting coordinates
+        //Declaring and assigning variables to avoid problems with datatransfer
         unsigned int hourAngle = 0;
         unsigned int rightAscension = 0;
         int declination = 0;
-        /* if(request->hasParam("hourAngle")) {
-            hourAngle=request->getParam("hourAngle")->value().toInt();
-            Serial.println(hourAngle);
-        }
+        
         if(request->hasParam("declination")) {
-            declination=request->getParam("declination")->value().toInt();
-            Serial.println(declination);
-        } */
-        if(request->hasParam("declination")) {
-                //Accepting string with +xx°xx' format
-                String str = request->getParam("declination")->value();
-                declination = sky.degToInt(str);
+            declination = request->getParam("declination")->value().toFloat()*60;
         }
         if(request->hasParam("hourAngle")) {
-            //Accepting string with xxhxxmxxs format
-            String str = request->getParam("hourAngle")->value();
-            //converting string to seconds
-            hourAngle = sky.timeToInt(str);
+            //Position can be set using hourAngle
+            hourAngle = request->getParam("hourAngle")->value().toFloat()*3600;
         
-            if(request->hasParam("declination")) {
-                //Accepting string with +xx°xx' format
-                String str = request->getParam("declination")->value();
-                declination = sky.degToInt(str);
-            }
+            
             sky.setPositionH(hourAngle, declination);
+            //Printing positions for reference
             Serial.println(sky.printData());
         }
 
         if(request->hasParam("rightAscension")) {
-            //Accepting string with xxhxxmxxs format
-            String str = request->getParam("rightAscension")->value();
-            //converting string to seconds
-            rightAscension = sky.timeToInt(str);
-        
-            
+            //Position can be set using rightascension
+            rightAscension = request->getParam("rightAscension")->value().toFloat()*60;
+    
             sky.setPositionR(rightAscension, declination);
+            //Printing positions for reference
             Serial.println(sky.printData());
         }
         request->send(200, "text/plain", " ");
         
     });
 
+
     server.begin();
-    /**/
     Serial.begin(9600);
     Serial.print("IP Address: ");
     Serial.println(WiFi.softAPIP());
     
 
-    //To set your current latitude, target the sysem at the polar star and hit the altitude endstop
+    //To set your current latitude, target the sysem at the polar star and press the altitude endstop
+    //setting lat via wifi takes to much time for the wifi-routine
     pinMode(ALT_SENSOR,  INPUT_PULLUP);
     while(digitalRead(ALT_SENSOR));
     delay(500);
-    sky.setLatitude(ALT_SENSOR); //setting lat via wifi takes to much time for the interrupt
+    sky.setLatitude(ALT_SENSOR); 
 
-    Serial.print("setLat");
+    Serial.print("Latitude ist now set");
 }
 
 void loop() {
-  sky.move();
+  sky.move();//movement if required
   // put your main code here, to run repeatedly:
 }
 
